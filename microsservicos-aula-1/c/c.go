@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
 )
 
 type Coupon struct {
@@ -18,15 +20,19 @@ type Coupons struct {
 func (c Coupons) Check(code string) string {
 	for _, item := range c.Coupon {
 		if code == item.Code {
-			return "valid"
+			return "Valid"
 		}
 	}
-	return "invalid"
+	return "Invalid"
 }
 
 type Result struct {
 	Status string
 }
+
+const (
+	ConnectionError = "connection error"
+)
 
 var coupons Coupons
 
@@ -37,11 +43,11 @@ func main() {
 
 	coupons.Coupon = append(coupons.Coupon, coupon)
 
-	http.HandleFunc("/", home)
+	http.HandleFunc("/", process)
 	http.ListenAndServe(":9092", nil)
 }
 
-func home(w http.ResponseWriter, r *http.Request) {
+func process(w http.ResponseWriter, r *http.Request) {
 	coupon := r.PostFormValue("coupon")
 	valid := coupons.Check(coupon)
 
@@ -53,5 +59,40 @@ func home(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fmt.Fprintf(w, string(jsonResult))
+
+	registerCoupon := makeHttpCall("http://localhost:9093", coupon)
+	if err != nil {
+		log.Fatal("Error to register coupon")
+	}
+
+	if registerCoupon.Status == "Inserted" {
+		log.Println("Coupon registered on database")
+	}
+
+}
+
+func makeHttpCall(urlMicroservice string, coupon string) Result {
+	values := url.Values{}
+	values.Add("coupon", coupon)
+
+
+	res, err := http.PostForm(urlMicroservice, values)
+	if err != nil {
+		result := Result{Status: ConnectionError}
+		return result
+	}
+
+	defer res.Body.Close()
+
+	data, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		log.Fatal("Error processing result")
+	}
+
+	result := Result{}
+
+	json.Unmarshal(data, &result)
+
+	return result
 
 }
